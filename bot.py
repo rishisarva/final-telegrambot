@@ -23,10 +23,8 @@ CSV_URL = "https://visionsjersey.com/wp-content/uploads/telegram_stock.csv"
 PAGE_SIZE = 5
 DELETE_AFTER = 300  # 5 minutes
 
-
 # ---------- MEMORY (avoid repeat in /daily9) ----------
 USED_DAILY_IDS = set()
-
 
 # ---------- DUMMY HTTP SERVER (RENDER FREE FIX) ----------
 
@@ -41,19 +39,16 @@ def run_http_server():
     server = HTTPServer(("0.0.0.0", port), HealthHandler)
     server.serve_forever()
 
-
 # ---------- HELPERS ----------
 
 def is_admin(update: Update):
     return update.effective_user.id == ADMIN_ID
-
 
 def load_csv():
     headers = {
         "User-Agent": "Mozilla/5.0 (TelegramBot)",
         "Accept": "text/csv,*/*"
     }
-
     r = requests.get(CSV_URL, headers=headers, timeout=15)
     r.raise_for_status()
 
@@ -63,15 +58,13 @@ def load_csv():
 
     return list(csv.DictReader(StringIO(text)))
 
-
 def whatsapp_card_text(p):
     return (
         f"🔥 {p['title']}\n\n"
         f"📏 Sizes: {p['sizes'].replace('|', ', ')}\n"
         f"🔗 {p['link']}\n\n"
-        f"⚡ Limited stock"
+        f"⚡ Order fast — limited stock"
     )
-
 
 async def auto_delete_messages(context, chat_id, message_ids):
     await asyncio.sleep(DELETE_AFTER)
@@ -81,20 +74,16 @@ async def auto_delete_messages(context, chat_id, message_ids):
         except:
             pass
 
-
 # ---------- COMMANDS ----------
 
 async def testcsv(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = load_csv()
     first = rows[0]
-
     await update.message.reply_text(
         "CSV OK ✅\n\n"
         f"Columns:\n{', '.join(first.keys())}\n\n"
-        f"Sample:\n"
-        f"{first['title']} | {first['club']}"
+        f"Sample:\n{first['title']} | {first['club']}"
     )
-
 
 async def clubs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update):
@@ -103,27 +92,22 @@ async def clubs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = load_csv()
     clubs = sorted(set(r["club"] for r in rows if r["club"]))
 
-    buttons = [
-        [InlineKeyboardButton(c, callback_data=f"club|{c}|0")]
-        for c in clubs
-    ]
+    buttons = [[InlineKeyboardButton(c, callback_data=f"club|{c}|0")] for c in clubs]
 
     await update.message.reply_text(
         "🏷 Select a Club",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
-
-async def send_player_page(update, context, page):
-    products = context.user_data["player_results"]
-    await send_products_page(update.message, context, products, page)
+async def player_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("⚽ Usage: /player messi")
         return
 
     keyword = " ".join(context.args).lower()
     rows = load_csv()
 
     results = [r for r in rows if keyword in r["title"].lower()]
-
     if not results:
         await update.message.reply_text("❌ No jerseys found")
         return
@@ -131,8 +115,7 @@ async def send_player_page(update, context, page):
     context.user_data["player_results"] = results
     await send_player_page(update, context, 0)
 
-
-# ---------- DAILY 9 (NEW FEATURE) ----------
+# ---------- DAILY 9 ----------
 
 async def daily9(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update):
@@ -154,7 +137,6 @@ async def daily9(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for p in selected:
         USED_DAILY_IDS.add(p["product_id"])
-
         msg = await update.message.reply_photo(
             photo=p["image"],
             caption=whatsapp_card_text(p)
@@ -164,7 +146,6 @@ async def daily9(update: Update, context: ContextTypes.DEFAULT_TYPE):
     asyncio.create_task(
         auto_delete_messages(context, update.message.chat_id, sent_ids)
     )
-
 
 # ---------- CALLBACKS ----------
 
@@ -180,16 +161,14 @@ async def club_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await send_products_page(query.message, context, products, page)
 
-
 async def send_products_page(message, context, products, page):
     start = page * PAGE_SIZE
     end = start + PAGE_SIZE
-    page_products = products[start:end]
     total_pages = (len(products) + PAGE_SIZE - 1) // PAGE_SIZE
 
     sent_ids = []
 
-    for p in page_products:
+    for p in products[start:end]:
         msg = await message.reply_photo(
             photo=p["image"],
             caption=whatsapp_card_text(p),
@@ -216,19 +195,15 @@ async def send_products_page(message, context, products, page):
         auto_delete_messages(context, message.chat_id, sent_ids)
     )
 
-
 async def send_player_page(update, context, page):
     products = context.user_data["player_results"]
-    await send_products_page(update, context, products, page)
-
+    await send_products_page(update.message, context, products, page)
 
 async def page_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     page = int(query.data.split("|")[1])
     await send_player_page(query.message, context, page)
-
 
 async def checkout_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -254,17 +229,12 @@ async def checkout_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         auto_delete_messages(context, msg.chat_id, [msg.message_id])
     )
 
-
 async def size_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     _, pid, vid = query.data.split("|")
-
-    checkout_url = (
-        f"https://visionsjersey.com/checkout/"
-        f"?add-to-cart={pid}&variation_id={vid}"
-    )
+    checkout_url = f"https://visionsjersey.com/checkout/?add-to-cart={pid}&variation_id={vid}"
 
     msg = await query.message.reply_text(
         "✅ Size selected\nProceed to checkout:",
@@ -276,7 +246,6 @@ async def size_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     asyncio.create_task(
         auto_delete_messages(context, msg.chat_id, [msg.message_id])
     )
-
 
 # ---------- START BOT ----------
 
@@ -297,6 +266,6 @@ def main():
 
     app.run_polling(drop_pending_updates=True)
 
-
 if __name__ == "__main__":
     main()
+
