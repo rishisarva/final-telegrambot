@@ -65,8 +65,9 @@ def whatsapp_text(p):
         f"🔥 *{p['title']}*\n\n"
         f"💰 Price: ₹{p['price']}\n"
         f"📏 Sizes: {p['sizes'].replace('|', ', ')}\n\n"
-        f"🛒 Buy here:\n{p['link']}"
+        f"📩 Want to order? Send *YES*"
     )
+
 
 
 async def auto_delete_messages(context, chat_id, message_ids):
