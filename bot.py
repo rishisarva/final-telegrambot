@@ -40,17 +40,39 @@ def load_csv():
 
 # /clubs command
 async def clubs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not is_admin(update): return
+    if not is_admin(update):
+        return
 
     rows = load_csv()
-    clubs = sorted(set(r["club"] for r in rows if r["club"]))
 
-    buttons = [[InlineKeyboardButton(c, callback_data=f"club|{c}")] for c in clubs]
+    if not rows:
+        await update.message.reply_text("CSV is empty.")
+        return
+
+    # Detect club column safely
+    headers = rows[0].keys()
+    if "club" not in headers:
+        await update.message.reply_text(
+            f"CSV error ❌\nMissing column: club\nFound columns:\n{', '.join(headers)}"
+        )
+        return
+
+    clubs = sorted(set(r["club"] for r in rows if r.get("club")))
+
+    if not clubs:
+        await update.message.reply_text("No clubs found in CSV.")
+        return
+
+    buttons = [
+        [InlineKeyboardButton(c, callback_data=f"club|{c}")]
+        for c in clubs
+    ]
 
     await update.message.reply_text(
         "🏷 Select a Club",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
+
 
 # Club click
 async def club_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
