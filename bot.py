@@ -1,66 +1,59 @@
 import os
+import csv
 import requests
+from io import StringIO
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# ===== ENV VARIABLES =====
+# ===== ENV =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
-
-WC_URL = "https://visionsjersey.com/wp-json/wc/v3/products"
-WC_KEY = os.getenv("WC_KEY")
-WC_SECRET = os.getenv("WC_SECRET")
-# =========================
+CSV_URL = "https://YOURDOMAIN.com/wp-content/uploads/stock.csv"
+# ===============
 
 def is_admin(update: Update):
     return update.effective_user.id == ADMIN_ID
 
+def load_csv():
+    r = requests.get(CSV_URL, timeout=10)
+    r.raise_for_status()
+    return list(csv.DictReader(StringIO(r.text)))
+
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update):
-        return  # admin-only
+        return
 
-    query = " ".join(context.args)
+    query = " ".join(context.args).strip().lower()
     if not query:
-        await update.message.reply_text("Use:\n/search ronaldo")
+        await update.message.reply_text("Use:\n/search barcelona")
         return
 
-    r = requests.get(
-        WC_URL,
-        auth=(WC_KEY, WC_SECRET),
-        params={"search": query, "per_page": 1}
-    )
+    products = load_csv()
 
-    products = r.json()
-    if not products:
-        await update.message.reply_text("❌ No product found")
+    matches = [
+        p for p in products
+        if p["club"] and query in p["club"].lower()
+    ]
+
+    if not matches:
+        await update.message.reply_text("❌ No in-stock jerseys found for this club")
         return
 
-    p = products[0]
+    # Limit to avoid spam
+    for p in matches[:5]:
+        sizes = p["sizes"].replace("|", ", ")
 
-    title = p["name"]
-    price = p["price"]
-    link = p["permalink"]
+        text = f"""📦 {p["title"]}
 
-    images = [img["src"] for img in p["images"]]
+🏷 Club: {p["club"]}
+💰 Price: ₹{p["price"]}
+📏 Sizes: {sizes}
 
-    sizes = []
-    for attr in p["attributes"]:
-        if attr["name"].lower() == "size":
-            sizes = attr["options"]
-
-    message = f"""📦 {title}
-
-💰 Price: ₹{price}
-📏 Sizes: {", ".join(sizes)}
-
-🔗 {link}
+🔗 {p["link"]}
 """
 
-    # Send images (max 3)
-    for img in images[:3]:
-        await update.message.reply_photo(img)
-
-    await update.message.reply_text(message)
+        await update.message.reply_photo(p["image"])
+        await update.message.reply_text(text)
 
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(CommandHandler("search", search))
