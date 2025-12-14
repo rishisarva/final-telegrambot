@@ -58,6 +58,15 @@ def load_csv():
 
     return list(csv.DictReader(StringIO(text)))
 
+# 👉 FOR /clubs and /player ONLY
+def club_player_text(p):
+    return (
+        f"🔥 {p['title']}\n\n"
+        f"📏 Sizes: {p['sizes'].replace('|', ', ')}\n\n"
+        f"📩 Want to order? Type \"YES\""
+    )
+
+# 👉 FOR /daily9 ONLY
 def whatsapp_card_text(p):
     return (
         f"🔥 {p['title']}\n\n"
@@ -171,7 +180,7 @@ async def send_products_page(message, context, products, page):
     for p in products[start:end]:
         msg = await message.reply_photo(
             photo=p["image"],
-            caption=whatsapp_card_text(p),
+            caption=club_player_text(p),
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("🛒 Checkout", callback_data=f"checkout|{p['product_id']}")
             ]])
@@ -268,4 +277,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
