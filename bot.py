@@ -3,31 +3,32 @@ import csv
 import requests
 from io import StringIO
 from threading import Thread
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-
-from flask import Flask
 
 # =====================
 # ENV
 # =====================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
-CSV_URL = "https://YOURDOMAIN.com/wp-content/uploads/stock.csv"
-PORT = int(os.getenv("PORT", 10000))
+CSV_URL = "https://visionsjersey.com/wp-content/uploads/stock.csv"
+PORT = int(os.getenv("PORT", "10000"))
 
 # =====================
-# FLASK DUMMY SERVER
+# DUMMY HTTP SERVER (NO FLASK)
 # =====================
-app_flask = Flask(__name__)
+class DummyHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"Bot is running")
 
-@app_flask.route("/")
-def home():
-    return "Bot is running"
-
-def run_flask():
-    app_flask.run(host="0.0.0.0", port=PORT)
+def run_http_server():
+    server = HTTPServer(("0.0.0.0", PORT), DummyHandler)
+    server.serve_forever()
 
 # =====================
 # TELEGRAM BOT
@@ -50,9 +51,10 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     products = load_csv()
+
     matches = [
         p for p in products
-        if p["club"] and query in p["club"].lower()
+        if p.get("club") and query in p["club"].lower()
     ]
 
     if not matches:
@@ -83,5 +85,5 @@ def run_bot():
 # START BOTH
 # =====================
 if __name__ == "__main__":
-    Thread(target=run_flask).start()
+    Thread(target=run_http_server, daemon=True).start()
     run_bot()
