@@ -11,7 +11,7 @@ from telegram.ext import (
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 BASE_URL = os.getenv("BASE_URL")
-CSV_URL = "https://YOURDOMAIN.com/wp-content/uploads/telegram_stock.csv"
+CSV_URL = "https://visionsjersey.com/wp-content/uploads/telegram_stock.csv"
 PORT = int(os.environ.get("PORT", 10000))
 
 
