@@ -46,27 +46,31 @@ async def clubs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = load_csv()
 
     if not rows:
-        await update.message.reply_text("CSV is empty.")
+        await update.message.reply_text("CSV loaded but has no rows.")
         return
 
-    # Detect club column safely
     headers = rows[0].keys()
-    if "club" not in headers:
-        await update.message.reply_text(
-            f"CSV error ❌\nMissing column: club\nFound columns:\n{', '.join(headers)}"
-        )
+    await update.message.reply_text(
+        f"Detected columns:\n{', '.join(headers)}"
+    )
+
+    club_key = None
+    for k in headers:
+        if k.strip().lower() == "club":
+            club_key = k
+            break
+
+    if not club_key:
+        await update.message.reply_text("❌ No club column found.")
         return
 
-    clubs = sorted(set(r["club"] for r in rows if r.get("club")))
+    clubs = sorted(set(r.get(club_key, "").strip() for r in rows if r.get(club_key)))
 
     if not clubs:
-        await update.message.reply_text("No clubs found in CSV.")
+        await update.message.reply_text("❌ Club column exists but is empty.")
         return
 
-    buttons = [
-        [InlineKeyboardButton(c, callback_data=f"club|{c}")]
-        for c in clubs
-    ]
+    buttons = [[InlineKeyboardButton(c, callback_data=f"club|{c}")] for c in clubs]
 
     await update.message.reply_text(
         "🏷 Select a Club",
