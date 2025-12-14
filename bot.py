@@ -38,6 +38,30 @@ def load_csv():
     r.raise_for_status()
     return list(csv.DictReader(StringIO(r.text)))
 
+async def testcsv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        rows = load_csv()
+
+        if not rows:
+            await update.message.reply_text("❌ CSV loaded but EMPTY")
+            return
+
+        first = rows[0]
+
+        await update.message.reply_text(
+            "CSV OK ✅\n\n"
+            f"Columns:\n{', '.join(first.keys())}\n\n"
+            f"Sample Row:\n"
+            f"Title: {first.get('title')}\n"
+            f"Club: {first.get('club')}\n"
+            f"Price: {first.get('price')}\n"
+            f"Sizes: {first.get('sizes')}"
+        )
+
+    except Exception as e:
+        await update.message.reply_text(f"CSV ERROR ❌\n{str(e)}")
+
+
 # /clubs command
 async def clubs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update):
