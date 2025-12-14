@@ -1,4 +1,4 @@
-import os, csv, requests, asyncio
+import os, csv, requests, asyncio, random
 from io import StringIO
 from threading import Thread
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -22,6 +22,10 @@ CSV_URL = "https://visionsjersey.com/wp-content/uploads/telegram_stock.csv"
 
 PAGE_SIZE = 5
 DELETE_AFTER = 300  # 5 minutes
+
+
+# ---------- MEMORY (avoid repeat in /daily9) ----------
+USED_DAILY_IDS = set()
 
 
 # ---------- DUMMY HTTP SERVER (RENDER FREE FIX) ----------
@@ -60,12 +64,12 @@ def load_csv():
     return list(csv.DictReader(StringIO(text)))
 
 
-def whatsapp_text(p):
+def whatsapp_card_text(p):
     return (
         f"🔥 {p['title']}\n\n"
-        f"💰 Price: ₹{p['price']}\n"
-        f"📏 Sizes: {p['sizes'].replace('|', ', ')}\n\n"
-        f"📩 Want to order? Send YES"
+        f"📏 Sizes: {p['sizes'].replace('|', ', ')}\n"
+        f"🔗 {p['link']}\n\n"
+        f"⚡ Limited stock"
     )
 
 
@@ -88,7 +92,7 @@ async def testcsv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "CSV OK ✅\n\n"
         f"Columns:\n{', '.join(first.keys())}\n\n"
         f"Sample:\n"
-        f"{first['title']} | {first['club']} | ₹{first['price']}"
+        f"{first['title']} | {first['club']}"
     )
 
 
@@ -128,6 +132,40 @@ async def player_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_player_page(update, context, 0)
 
 
+# ---------- DAILY 9 (NEW FEATURE) ----------
+
+async def daily9(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update):
+        return
+
+    global USED_DAILY_IDS
+
+    rows = load_csv()
+    available = [r for r in rows if r["product_id"] not in USED_DAILY_IDS]
+
+    if len(available) < 9:
+        USED_DAILY_IDS.clear()
+        available = rows
+
+    random.shuffle(available)
+    selected = available[:9]
+
+    sent_ids = []
+
+    for p in selected:
+        USED_DAILY_IDS.add(p["product_id"])
+
+        msg = await update.message.reply_photo(
+            photo=p["image"],
+            caption=whatsapp_card_text(p)
+        )
+        sent_ids.append(msg.message_id)
+
+    asyncio.create_task(
+        auto_delete_messages(context, update.message.chat_id, sent_ids)
+    )
+
+
 # ---------- CALLBACKS ----------
 
 async def club_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -154,7 +192,7 @@ async def send_products_page(message, context, products, page):
     for p in page_products:
         msg = await message.reply_photo(
             photo=p["image"],
-            caption=whatsapp_text(p),
+            caption=whatsapp_card_text(p),
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("🛒 Checkout", callback_data=f"checkout|{p['product_id']}")
             ]])
@@ -250,6 +288,7 @@ def main():
     app.add_handler(CommandHandler("testcsv", testcsv))
     app.add_handler(CommandHandler("clubs", clubs))
     app.add_handler(CommandHandler("player", player_search))
+    app.add_handler(CommandHandler("daily9", daily9))
 
     app.add_handler(CallbackQueryHandler(club_click, pattern="^club\\|"))
     app.add_handler(CallbackQueryHandler(page_click, pattern="^page\\|"))
