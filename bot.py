@@ -1,4 +1,4 @@
-import os, csv, requests, asyncio, urllib.parse
+import os, csv, requests, asyncio
 from io import StringIO
 from threading import Thread
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -60,14 +60,13 @@ def load_csv():
     return list(csv.DictReader(StringIO(text)))
 
 
-def whatsapp_share_url(p):
-    text = (
+def whatsapp_text(p):
+    return (
         f"🔥 {p['title']}\n\n"
         f"💰 Price: ₹{p['price']}\n"
         f"📏 Sizes: {p['sizes'].replace('|', ', ')}\n\n"
         f"📩 Want to order? Send YES"
     )
-    return "https://t.me/share/url?text=" + urllib.parse.quote(text)
 
 
 async def auto_delete_messages(context, chat_id, message_ids):
@@ -153,18 +152,11 @@ async def send_products_page(message, context, products, page):
     sent_ids = []
 
     for p in page_products:
-        text = (
-            f"📦 {p['title']}\n"
-            f"💰 ₹{p['price']}\n"
-            f"📏 Sizes: {p['sizes'].replace('|', ', ')}"
-        )
-
         msg = await message.reply_photo(
             photo=p["image"],
-            caption=text,
+            caption=whatsapp_text(p),
             reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("🛒 Checkout", callback_data=f"checkout|{p['product_id']}"),
-                InlineKeyboardButton("📤 Share to WhatsApp", url=whatsapp_share_url(p))
+                InlineKeyboardButton("🛒 Checkout", callback_data=f"checkout|{p['product_id']}")
             ]])
         )
         sent_ids.append(msg.message_id)
