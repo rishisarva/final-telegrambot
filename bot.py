@@ -19,7 +19,9 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
 CSV_URL = "https://visionsjersey.com/wp-content/uploads/telegram_stock.csv"
-DELETE_AFTER = 600  # 10 minutes
+
+PAGE_SIZE = 5
+DELETE_AFTER = 300  # 5 minutes
 
 
 # ---------- DUMMY HTTP SERVER (RENDER FREE FIX) ----------
@@ -58,12 +60,22 @@ def load_csv():
     return list(csv.DictReader(StringIO(text)))
 
 
-async def auto_delete(context, chat_id, message_id):
+def whatsapp_text(p):
+    return (
+        f"🔥 *{p['title']}*\n\n"
+        f"💰 Price: ₹{p['price']}\n"
+        f"📏 Sizes: {p['sizes'].replace('|', ', ')}\n\n"
+        f"🛒 Buy here:\n{p['link']}"
+    )
+
+
+async def auto_delete_messages(context, chat_id, message_ids):
     await asyncio.sleep(DELETE_AFTER)
-    try:
-        await context.bot.delete_message(chat_id, message_id)
-    except:
-        pass
+    for mid in message_ids:
+        try:
+            await context.bot.delete_message(chat_id, mid)
+        except:
+            pass
 
 
 # ---------- COMMANDS ----------
@@ -88,7 +100,7 @@ async def clubs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clubs = sorted(set(r["club"] for r in rows if r["club"]))
 
     buttons = [
-        [InlineKeyboardButton(c, callback_data=f"club|{c}")]
+        [InlineKeyboardButton(c, callback_data=f"club|{c}|0")]
         for c in clubs
     ]
 
@@ -98,39 +110,111 @@ async def clubs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def player_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("⚽ Usage: /player messi")
+        return
+
+    keyword = " ".join(context.args).lower()
+    rows = load_csv()
+
+    results = [r for r in rows if keyword in r["title"].lower()]
+
+    if not results:
+        await update.message.reply_text("❌ No jerseys found")
+        return
+
+    context.user_data["player_results"] = results
+    await send_player_page(update, context, 0)
+
+
 # ---------- CALLBACKS ----------
 
 async def club_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    club = query.data.split("|")[1]
-    rows = load_csv()
-    products = [r for r in rows if r["club"] == club][:5]
+    _, club, page = query.data.split("|")
+    page = int(page)
 
-    for p in products:
+    rows = load_csv()
+    products = [r for r in rows if r["club"] == club]
+
+    await send_products_page(query.message, context, products, page)
+
+
+async def send_products_page(message, context, products, page):
+    start = page * PAGE_SIZE
+    end = start + PAGE_SIZE
+    page_products = products[start:end]
+    total_pages = (len(products) + PAGE_SIZE - 1) // PAGE_SIZE
+
+    sent_ids = []
+
+    for p in page_products:
         text = (
             f"📦 {p['title']}\n"
             f"💰 ₹{p['price']}\n"
             f"📏 Sizes: {p['sizes'].replace('|', ', ')}"
         )
 
-        keyboard = InlineKeyboardMarkup([[
-            InlineKeyboardButton(
-                "🛒 Checkout",
-                callback_data=f"checkout|{p['product_id']}"
-            )
-        ]])
-
-        msg = await query.message.reply_photo(
+        msg = await message.reply_photo(
             photo=p["image"],
             caption=text,
-            reply_markup=keyboard
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("🛒 Checkout", callback_data=f"checkout|{p['product_id']}"),
+                InlineKeyboardButton("📋 Copy for WhatsApp", callback_data=f"wa|{p['product_id']}")
+            ]])
         )
+        sent_ids.append(msg.message_id)
 
-        asyncio.create_task(
-            auto_delete(context, msg.chat_id, msg.message_id)
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("⬅ Prev", callback_data=f"page|{page-1}"))
+    if end < len(products):
+        nav.append(InlineKeyboardButton("Next ➡", callback_data=f"page|{page+1}"))
+
+    if nav:
+        nav_msg = await message.reply_text(
+            f"📄 Page {page+1}/{total_pages}",
+            reply_markup=InlineKeyboardMarkup([nav])
         )
+        sent_ids.append(nav_msg.message_id)
+
+    asyncio.create_task(
+        auto_delete_messages(context, message.chat_id, sent_ids)
+    )
+
+
+async def send_player_page(update, context, page):
+    products = context.user_data["player_results"]
+    await send_products_page(update, context, products, page)
+
+
+async def page_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    page = int(query.data.split("|")[1])
+    await send_player_page(query.message, context, page)
+
+
+async def whatsapp_copy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    pid = query.data.split("|")[1]
+    rows = load_csv()
+    product = next(r for r in rows if r["product_id"] == pid)
+
+    msg = await query.message.reply_text(
+        whatsapp_text(product),
+        parse_mode="Markdown"
+    )
+
+    asyncio.create_task(
+        auto_delete_messages(context, msg.chat_id, [msg.message_id])
+    )
 
 
 async def checkout_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -141,15 +225,10 @@ async def checkout_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rows = load_csv()
     product = next(r for r in rows if r["product_id"] == pid)
 
-    size_map = dict(
-        s.split(":") for s in product["variation_map"].split("|")
-    )
+    size_map = dict(s.split(":") for s in product["variation_map"].split("|"))
 
     buttons = [
-        [InlineKeyboardButton(
-            size.upper(),
-            callback_data=f"size|{pid}|{vid}"
-        )]
+        [InlineKeyboardButton(size.upper(), callback_data=f"size|{pid}|{vid}")]
         for size, vid in size_map.items()
     ]
 
@@ -159,7 +238,7 @@ async def checkout_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     asyncio.create_task(
-        auto_delete(context, msg.chat_id, msg.message_id)
+        auto_delete_messages(context, msg.chat_id, [msg.message_id])
     )
 
 
@@ -182,21 +261,24 @@ async def size_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     asyncio.create_task(
-        auto_delete(context, msg.chat_id, msg.message_id)
+        auto_delete_messages(context, msg.chat_id, [msg.message_id])
     )
 
 
 # ---------- START BOT ----------
 
 def main():
-    # Start dummy HTTP server (Render free requirement)
     Thread(target=run_http_server, daemon=True).start()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("testcsv", testcsv))
     app.add_handler(CommandHandler("clubs", clubs))
+    app.add_handler(CommandHandler("player", player_search))
+
     app.add_handler(CallbackQueryHandler(club_click, pattern="^club\\|"))
+    app.add_handler(CallbackQueryHandler(page_click, pattern="^page\\|"))
+    app.add_handler(CallbackQueryHandler(whatsapp_copy, pattern="^wa\\|"))
     app.add_handler(CallbackQueryHandler(checkout_click, pattern="^checkout\\|"))
     app.add_handler(CallbackQueryHandler(size_click, pattern="^size\\|"))
 
@@ -205,4 +287,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
