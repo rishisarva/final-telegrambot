@@ -114,9 +114,9 @@ async def clubs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def player_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        await update.message.reply_text("⚽ Usage: /player messi")
+async def send_player_page(update, context, page):
+    products = context.user_data["player_results"]
+    await send_products_page(update.message, context, products, page)
         return
 
     keyword = " ".join(context.args).lower()
