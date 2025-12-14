@@ -1,19 +1,26 @@
 import os, csv, requests, asyncio
 from io import StringIO
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     CallbackQueryHandler,
-    ContextTypes,
+    ContextTypes
 )
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
-BASE_URL = os.getenv("BASE_URL")
-CSV_URL = "https://visionsjersey.com/wp-content/uploads/telegram_stock.csv"
-PORT = int(os.environ.get("PORT", 10000))
 
+CSV_URL = "https://visionsjersey.com/wp-content/uploads/telegram_stock.csv"
+
+DELETE_AFTER = 600  # 10 minutes
+
+
+# ---------- HELPERS ----------
 
 def is_admin(update: Update):
     return update.effective_user.id == ADMIN_ID
@@ -29,34 +36,32 @@ def load_csv():
     r.raise_for_status()
 
     text = r.text.strip()
-
-    if text.lower().startswith("<!doctype") or "<html" in text.lower():
-        raise Exception("CSV URL returned HTML, not CSV")
+    if "<html" in text.lower():
+        raise Exception("CSV returned HTML")
 
     return list(csv.DictReader(StringIO(text)))
 
 
+async def auto_delete(context, chat_id, message_id):
+    await asyncio.sleep(DELETE_AFTER)
+    try:
+        await context.bot.delete_message(chat_id, message_id)
+    except:
+        pass
+
 
 # ---------- COMMANDS ----------
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if is_admin(update):
-        await update.message.reply_text("✅ Bot is running")
-
-
 async def testcsv(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        rows = load_csv()
-        if not rows:
-            await update.message.reply_text("❌ CSV EMPTY")
-            return
+    rows = load_csv()
+    first = rows[0]
 
-        headers = rows[0].keys()
-        await update.message.reply_text(
-            "CSV OK ✅\n\nColumns:\n" + ", ".join(headers)
-        )
-    except Exception as e:
-        await update.message.reply_text(f"CSV ERROR ❌\n{e}")
+    await update.message.reply_text(
+        "CSV OK ✅\n\n"
+        f"Columns:\n{', '.join(first.keys())}\n\n"
+        f"Sample:\n"
+        f"{first['title']} | {first['club']} | ₹{first['price']}"
+    )
 
 
 async def clubs(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -64,20 +69,20 @@ async def clubs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     rows = load_csv()
-    club_key = next((k for k in rows[0] if k.lower() == "club"), None)
+    clubs = sorted(set(r["club"] for r in rows if r["club"]))
 
-    if not club_key:
-        await update.message.reply_text("❌ No club column found")
-        return
+    buttons = [
+        [InlineKeyboardButton(c, callback_data=f"club|{c}")]
+        for c in clubs
+    ]
 
-    clubs = sorted({r[club_key].strip() for r in rows if r.get(club_key)})
-
-    keyboard = [[InlineKeyboardButton(c, callback_data=f"club|{c}")] for c in clubs]
     await update.message.reply_text(
-        "🏷 Select Club",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        "🏷 Select a Club",
+        reply_markup=InlineKeyboardMarkup(buttons)
     )
 
+
+# ---------- CALLBACKS ----------
 
 async def club_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -85,36 +90,100 @@ async def club_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     club = query.data.split("|")[1]
     rows = load_csv()
-    products = [r for r in rows if r.get("club") == club][:5]
+
+    products = [r for r in rows if r["club"] == club][:5]
 
     for p in products:
         text = (
             f"📦 {p['title']}\n"
             f"💰 ₹{p['price']}\n"
-            f"📏 Sizes: {p['sizes']}"
+            f"📏 Sizes: {p['sizes'].replace('|', ', ')}"
         )
 
-        btn = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🛒 Checkout", url=p["checkout_url"])]
-        ])
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                "🛒 Checkout",
+                callback_data=f"checkout|{p['product_id']}"
+            )
+        ]])
 
-        await query.message.reply_text(text, reply_markup=btn)
+        msg = await query.message.reply_photo(
+            photo=p["image"],
+            caption=text,
+            reply_markup=keyboard
+        )
+
+        asyncio.create_task(
+            auto_delete(context, msg.chat_id, msg.message_id)
+        )
 
 
-# ---------- APP ----------
+async def checkout_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
 
-app = ApplicationBuilder().token(BOT_TOKEN).build()
+    pid = query.data.split("|")[1]
+    rows = load_csv()
+    product = next(r for r in rows if r["product_id"] == pid)
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("testcsv", testcsv))
-app.add_handler(CommandHandler("clubs", clubs))
-app.add_handler(CallbackQueryHandler(club_click, pattern="^club\\|"))
+    size_map = dict(
+        s.split(":") for s in product["variation_map"].split("|")
+    )
+
+    buttons = [
+        [InlineKeyboardButton(
+            size.upper(),
+            callback_data=f"size|{pid}|{vid}"
+        )]
+        for size, vid in size_map.items()
+    ]
+
+    msg = await query.message.reply_text(
+        "📏 Select Size",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+    asyncio.create_task(
+        auto_delete(context, msg.chat_id, msg.message_id)
+    )
+
+
+async def size_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    _, pid, vid = query.data.split("|")
+
+    checkout_url = (
+        f"https://visionsjersey.com/checkout/"
+        f"?add-to-cart={pid}&variation_id={vid}"
+    )
+
+    msg = await query.message.reply_text(
+        "✅ Size selected\nProceed to checkout:",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("Checkout Now", url=checkout_url)
+        ]])
+    )
+
+    asyncio.create_task(
+        auto_delete(context, msg.chat_id, msg.message_id)
+    )
+
+
+# ---------- START BOT ----------
+
+def main():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("testcsv", testcsv))
+    app.add_handler(CommandHandler("clubs", clubs))
+    app.add_handler(CallbackQueryHandler(club_click, pattern="^club\\|"))
+    app.add_handler(CallbackQueryHandler(checkout_click, pattern="^checkout\\|"))
+    app.add_handler(CallbackQueryHandler(size_click, pattern="^size\\|"))
+
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=BOT_TOKEN,
-        webhook_url=f"{BASE_URL}/{BOT_TOKEN}",
-    )
+    main()
