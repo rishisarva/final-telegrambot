@@ -1,5 +1,8 @@
 import os, csv, requests, asyncio
 from io import StringIO
+from threading import Thread
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -16,8 +19,21 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
 
 CSV_URL = "https://visionsjersey.com/wp-content/uploads/telegram_stock.csv"
-
 DELETE_AFTER = 600  # 10 minutes
+
+
+# ---------- DUMMY HTTP SERVER (RENDER FREE FIX) ----------
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running")
+
+def run_http_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    server.serve_forever()
 
 
 # ---------- HELPERS ----------
@@ -37,7 +53,7 @@ def load_csv():
 
     text = r.text.strip()
     if "<html" in text.lower():
-        raise Exception("CSV returned HTML")
+        raise Exception("CSV returned HTML, not CSV")
 
     return list(csv.DictReader(StringIO(text)))
 
@@ -90,7 +106,6 @@ async def club_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     club = query.data.split("|")[1]
     rows = load_csv()
-
     products = [r for r in rows if r["club"] == club][:5]
 
     for p in products:
@@ -174,6 +189,9 @@ async def size_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------- START BOT ----------
 
 def main():
+    # Start dummy HTTP server (Render free requirement)
+    Thread(target=run_http_server, daemon=True).start()
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("testcsv", testcsv))
@@ -187,3 +205,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
