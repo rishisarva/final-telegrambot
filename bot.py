@@ -1,7 +1,5 @@
 import os, csv, requests, asyncio
 from io import StringIO
-from threading import Thread
-from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from telegram import (
     Update,
@@ -17,41 +15,48 @@ from telegram.ext import (
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
-CSV_URL = "https://YOURDOMAIN.com/wp-content/uploads/telegram_stock.csv"
-PORT = int(os.getenv("PORT", "10000"))
 
-# Dummy web server for Render
-class DummyHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Bot is running")
+CSV_URL = "https://visionsjersey.com/wp-content/uploads/telegram_stock.csv"
 
-def run_http():
-    HTTPServer(("0.0.0.0", PORT), DummyHandler).serve_forever()
+
+# ---------- HELPERS ----------
 
 def is_admin(update):
     return update.effective_user.id == ADMIN_ID
 
+
 def load_csv():
-    r = requests.get(CSV_URL, timeout=10)
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "text/csv"
+    }
+    r = requests.get(CSV_URL, headers=headers, timeout=15)
     r.raise_for_status()
-    return list(csv.DictReader(StringIO(r.text)))
+
+    text = r.text.strip()
+    if "<html" in text.lower():
+        raise Exception("CSV returned HTML")
+
+    return list(csv.DictReader(StringIO(text)))
+
+
+# ---------- DEBUG ----------
 
 async def testcsv(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_admin(update):
+        return
+
     try:
         rows = load_csv()
-
         if not rows:
             await update.message.reply_text("❌ CSV loaded but EMPTY")
             return
 
         first = rows[0]
-
         await update.message.reply_text(
             "CSV OK ✅\n\n"
             f"Columns:\n{', '.join(first.keys())}\n\n"
-            f"Sample Row:\n"
+            f"Sample:\n"
             f"Title: {first.get('title')}\n"
             f"Club: {first.get('club')}\n"
             f"Price: {first.get('price')}\n"
@@ -62,39 +67,23 @@ async def testcsv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"CSV ERROR ❌\n{str(e)}")
 
 
-# /clubs command
+# ---------- CLUB LIST ----------
+
 async def clubs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update):
         return
 
     rows = load_csv()
-
-    if not rows:
-        await update.message.reply_text("CSV loaded but has no rows.")
-        return
-
-    headers = rows[0].keys()
-    await update.message.reply_text(
-        f"Detected columns:\n{', '.join(headers)}"
-    )
-
-    club_key = None
-    for k in headers:
-        if k.strip().lower() == "club":
-            club_key = k
-            break
-
-    if not club_key:
-        await update.message.reply_text("❌ No club column found.")
-        return
-
-    clubs = sorted(set(r.get(club_key, "").strip() for r in rows if r.get(club_key)))
+    clubs = sorted({r["club"] for r in rows if r.get("club")})
 
     if not clubs:
-        await update.message.reply_text("❌ Club column exists but is empty.")
+        await update.message.reply_text("❌ No clubs found")
         return
 
-    buttons = [[InlineKeyboardButton(c, callback_data=f"club|{c}")] for c in clubs]
+    buttons = [
+        [InlineKeyboardButton(c, callback_data=f"club|{c}")]
+        for c in clubs
+    ]
 
     await update.message.reply_text(
         "🏷 Select a Club",
@@ -102,7 +91,8 @@ async def clubs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# Club click
+# ---------- CLUB CLICK ----------
+
 async def club_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -112,18 +102,22 @@ async def club_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     products = [r for r in rows if r["club"] == club][:5]
 
     for p in products:
+        text = (
+            f"📦 {p['title']}\n"
+            f"💰 ₹{p['price']}\n"
+            f"📏 Sizes: {p['sizes'].replace('|', ', ')}"
+        )
+
         btn = InlineKeyboardMarkup([[
             InlineKeyboardButton("🛒 Checkout", callback_data=f"checkout|{p['product_id']}")
         ]])
 
-        text = f"""📦 {p['title']}
-💰 ₹{p['price']}
-📏 Sizes: {p['sizes'].replace('|', ', ')}"""
-
         await query.message.reply_photo(p["image"])
         await query.message.reply_text(text, reply_markup=btn)
 
-# Checkout click
+
+# ---------- CHECKOUT ----------
+
 async def checkout_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -133,9 +127,10 @@ async def checkout_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     size_map = dict(s.split(":") for s in product["variation_map"].split("|"))
 
-    buttons = [[
-        InlineKeyboardButton(size.upper(), callback_data=f"size|{pid}|{vid}")
-    ] for size, vid in size_map.items()]
+    buttons = [
+        [InlineKeyboardButton(size.upper(), callback_data=f"size|{pid}|{vid}")]
+        for size, vid in size_map.items()
+    ]
 
     msg = await query.message.reply_text(
         "📏 Select Size",
@@ -144,13 +139,15 @@ async def checkout_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     asyncio.create_task(auto_delete(context, msg.chat_id, msg.message_id))
 
-# Size click
+
+# ---------- SIZE ----------
+
 async def size_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     _, pid, vid = query.data.split("|")
-    checkout = f"https://YOURDOMAIN.com/checkout/?add-to-cart={pid}&variation_id={vid}"
+    checkout = f"https://visionsjersey.com/checkout/?add-to-cart={pid}&variation_id={vid}"
 
     msg = await query.message.reply_text(
         "✅ Size selected\nProceed to checkout:",
@@ -161,6 +158,7 @@ async def size_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     asyncio.create_task(auto_delete(context, msg.chat_id, msg.message_id))
 
+
 async def auto_delete(context, chat_id, msg_id):
     await asyncio.sleep(600)
     try:
@@ -168,16 +166,23 @@ async def auto_delete(context, chat_id, msg_id):
     except:
         pass
 
-def run_bot():
+
+# ---------- RUN ----------
+
+def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
+    app.add_handler(CommandHandler("testcsv", testcsv))
     app.add_handler(CommandHandler("clubs", clubs))
     app.add_handler(CallbackQueryHandler(club_click, pattern="^club\\|"))
     app.add_handler(CallbackQueryHandler(checkout_click, pattern="^checkout\\|"))
     app.add_handler(CallbackQueryHandler(size_click, pattern="^size\\|"))
 
-    app.run_polling()
+    app.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True
+    )
+
 
 if __name__ == "__main__":
-    Thread(target=run_http, daemon=True).start()
-    run_bot()
+    main()
