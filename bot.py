@@ -1,4 +1,4 @@
-import os, csv, requests, asyncio
+import os, csv, requests, asyncio, urllib.parse
 from io import StringIO
 from threading import Thread
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -60,14 +60,14 @@ def load_csv():
     return list(csv.DictReader(StringIO(text)))
 
 
-def whatsapp_text(p):
-    return (
-        f"🔥 *{p['title']}*\n\n"
+def whatsapp_share_url(p):
+    text = (
+        f"🔥 {p['title']}\n\n"
         f"💰 Price: ₹{p['price']}\n"
         f"📏 Sizes: {p['sizes'].replace('|', ', ')}\n\n"
-        f"📩 Want to order? Send *YES*"
+        f"📩 Want to order? Send YES"
     )
-
+    return "https://t.me/share/url?text=" + urllib.parse.quote(text)
 
 
 async def auto_delete_messages(context, chat_id, message_ids):
@@ -164,7 +164,7 @@ async def send_products_page(message, context, products, page):
             caption=text,
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("🛒 Checkout", callback_data=f"checkout|{p['product_id']}"),
-                InlineKeyboardButton("📋 Copy for WhatsApp", callback_data=f"wa|{p['product_id']}")
+                InlineKeyboardButton("📤 Share to WhatsApp", url=whatsapp_share_url(p))
             ]])
         )
         sent_ids.append(msg.message_id)
@@ -198,24 +198,6 @@ async def page_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     page = int(query.data.split("|")[1])
     await send_player_page(query.message, context, page)
-
-
-async def whatsapp_copy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    pid = query.data.split("|")[1]
-    rows = load_csv()
-    product = next(r for r in rows if r["product_id"] == pid)
-
-    msg = await query.message.reply_text(
-        whatsapp_text(product),
-        parse_mode="Markdown"
-    )
-
-    asyncio.create_task(
-        auto_delete_messages(context, msg.chat_id, [msg.message_id])
-    )
 
 
 async def checkout_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -279,7 +261,6 @@ def main():
 
     app.add_handler(CallbackQueryHandler(club_click, pattern="^club\\|"))
     app.add_handler(CallbackQueryHandler(page_click, pattern="^page\\|"))
-    app.add_handler(CallbackQueryHandler(whatsapp_copy, pattern="^wa\\|"))
     app.add_handler(CallbackQueryHandler(checkout_click, pattern="^checkout\\|"))
     app.add_handler(CallbackQueryHandler(size_click, pattern="^size\\|"))
 
