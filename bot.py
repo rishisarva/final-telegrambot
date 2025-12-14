@@ -20,9 +20,21 @@ def is_admin(update: Update):
 
 
 def load_csv():
-    r = requests.get(CSV_URL, timeout=15)
+    headers = {
+        "User-Agent": "Mozilla/5.0 (TelegramBot)",
+        "Accept": "text/csv,*/*"
+    }
+
+    r = requests.get(CSV_URL, headers=headers, timeout=15)
     r.raise_for_status()
-    return list(csv.DictReader(StringIO(r.text)))
+
+    text = r.text.strip()
+
+    if text.lower().startswith("<!doctype") or "<html" in text.lower():
+        raise Exception("CSV URL returned HTML, not CSV")
+
+    return list(csv.DictReader(StringIO(text)))
+
 
 
 # ---------- COMMANDS ----------
