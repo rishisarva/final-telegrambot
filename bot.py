@@ -8,7 +8,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 # ===== ENV =====
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
-CSV_URL = "https://YOURDOMAIN.com/wp-content/uploads/stock.csv"
+CSV_URL = "https://visionsjersey.com/wp-content/uploads/stock.csv"
 # ===============
 
 def is_admin(update: Update):
