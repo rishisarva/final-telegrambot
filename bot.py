@@ -1,7 +1,5 @@
 import os, csv, requests, asyncio, random
 from io import StringIO
-from threading import Thread
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from telegram import (
     Update,
@@ -24,36 +22,17 @@ PAGE_SIZE = 5
 DELETE_AFTER = 300  # 5 minutes
 
 # ---------- WEBHOOK CONFIG ----------
-WEBHOOK_URL = os.environ.get(
-    "WEBHOOK_URL",
-    "https://telegram-websearch.onrender.com"  # 🔴 replace if URL changes
-)
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # must be set in Render
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 
 # ---------- MEMORY (avoid repeat in /daily9) ----------
 USED_DAILY_IDS = set()
 
-# ---------- DUMMY HTTP SERVER (RENDER FREE FIX) ----------
-
-class HealthHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
-
-    def do_POST(self):
-        self.send_response(200)
-        self.end_headers()
-
-def run_http_server():
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), HealthHandler)
-    server.serve_forever()
-
 # ---------- HELPERS ----------
 
 def is_admin(update: Update):
     return update.effective_user.id == ADMIN_ID
+
 
 def load_csv():
     headers = {
@@ -69,6 +48,7 @@ def load_csv():
 
     return list(csv.DictReader(StringIO(text)))
 
+
 # 👉 FOR /clubs and /player ONLY
 def club_player_text(p):
     return (
@@ -76,6 +56,7 @@ def club_player_text(p):
         f"📏 Sizes: {p['sizes'].replace('|', ', ')}\n\n"
         f"📩 Want to order? Type \"YES\""
     )
+
 
 # 👉 FOR /daily9 ONLY
 def whatsapp_card_text(p):
@@ -85,6 +66,7 @@ def whatsapp_card_text(p):
         f"🔗 {p['link']}\n\n"
         f"⚡ Order fast — limited stock"
     )
+
 
 async def auto_delete_messages(context, chat_id, message_ids):
     await asyncio.sleep(DELETE_AFTER)
@@ -105,6 +87,7 @@ async def testcsv(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Sample:\n{first['title']} | {first['club']}"
     )
 
+
 async def clubs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(update):
         return
@@ -118,6 +101,7 @@ async def clubs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🏷 Select a Club",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
+
 
 async def player_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
@@ -181,6 +165,7 @@ async def club_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await send_products_page(query.message, context, products, page)
 
+
 async def send_products_page(message, context, products, page):
     start = page * PAGE_SIZE
     end = start + PAGE_SIZE
@@ -215,15 +200,18 @@ async def send_products_page(message, context, products, page):
         auto_delete_messages(context, message.chat_id, sent_ids)
     )
 
+
 async def send_player_page(update, context, page):
     products = context.user_data["player_results"]
     await send_products_page(update.message, context, products, page)
+
 
 async def page_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     page = int(query.data.split("|")[1])
     await send_player_page(query.message, context, page)
+
 
 async def checkout_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -249,6 +237,7 @@ async def checkout_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         auto_delete_messages(context, msg.chat_id, [msg.message_id])
     )
 
+
 async def size_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -267,11 +256,9 @@ async def size_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         auto_delete_messages(context, msg.chat_id, [msg.message_id])
     )
 
-# ---------- START BOT (WEBHOOK) ----------
+# ---------- START BOT (WEBHOOK ONLY) ----------
 
 def main():
-    Thread(target=run_http_server, daemon=True).start()
-
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("testcsv", testcsv))
