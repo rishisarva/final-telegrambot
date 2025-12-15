@@ -23,6 +23,13 @@ CSV_URL = "https://visionsjersey.com/wp-content/uploads/telegram_stock.csv"
 PAGE_SIZE = 5
 DELETE_AFTER = 300  # 5 minutes
 
+# ---------- WEBHOOK CONFIG ----------
+WEBHOOK_URL = os.environ.get(
+    "WEBHOOK_URL",
+    "https://telegram-websearch.onrender.com"  # 🔴 replace if URL changes
+)
+WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
+
 # ---------- MEMORY (avoid repeat in /daily9) ----------
 USED_DAILY_IDS = set()
 
@@ -32,7 +39,11 @@ class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Bot is running")
+        self.wfile.write(b"OK")
+
+    def do_POST(self):
+        self.send_response(200)
+        self.end_headers()
 
 def run_http_server():
     port = int(os.environ.get("PORT", 10000))
@@ -256,7 +267,7 @@ async def size_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         auto_delete_messages(context, msg.chat_id, [msg.message_id])
     )
 
-# ---------- START BOT ----------
+# ---------- START BOT (WEBHOOK) ----------
 
 def main():
     Thread(target=run_http_server, daemon=True).start()
@@ -273,7 +284,13 @@ def main():
     app.add_handler(CallbackQueryHandler(checkout_click, pattern="^checkout\\|"))
     app.add_handler(CallbackQueryHandler(size_click, pattern="^size\\|"))
 
-    app.run_polling(drop_pending_updates=True)
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=int(os.environ.get("PORT", 10000)),
+        url_path=WEBHOOK_PATH,
+        webhook_url=WEBHOOK_URL + WEBHOOK_PATH,
+        drop_pending_updates=True
+    )
 
 if __name__ == "__main__":
     main()
